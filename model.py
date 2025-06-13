@@ -20,7 +20,6 @@ class InputEmbedding(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
-        # Create an embedding layer that maps token IDs to d_model-dimensional vectors
         self.embedding = nn.Embedding(vocab_size, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -33,7 +32,6 @@ class InputEmbedding(nn.Module):
         Returns:
             torch.Tensor: Embedded and scaled tensor (batch_size, seq_len, d_model).
         """
-        # Multiply by sqrt(d_model) as per the transformer paper's scaling factor
         return self.embedding(x) * math.sqrt(self.d_model)
 
 
@@ -57,23 +55,17 @@ class PositionalEncoding(nn.Module):
         self.seq_len = seq_len
         self.dropout = nn.Dropout(dropout)
 
-        # Create a positional encoding matrix of shape (seq_len, d_model)
         pe = torch.zeros(seq_len, d_model)
 
-        # Create a position vector (seq_len, 1) for calculating sin/cos arguments
         position = torch.arange(0, seq_len).unsqueeze(1).float()
-        # Calculate the division term for the sinusoidal functions
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
         )
 
-        # Apply sine to even indices (0, 2, 4, ...)
         pe[:, 0::2] = torch.sin(position * div_term)
-        # Apply cosine to odd indices (1, 3, 5, ...)
         pe[:, 1::2] = torch.cos(position * div_term)
 
         pe = pe.unsqueeze(0)  # Add batch dimension: (1, seq_len, d_model)
-        # Register 'pe' as a buffer, so it's part of the module's state but not a learnable parameter
         self.register_buffer("pe", pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -86,9 +78,6 @@ class PositionalEncoding(nn.Module):
         Returns:
             torch.Tensor: Input tensor with positional encoding added and dropout applied.
         """
-        # Add positional encoding to the input.
-        # We slice pe to match the current sequence length of x.
-        # .requires_grad_(False) ensures that positional encodings are not updated during training.
         x = x + (self.pe[:, : x.size(1)]).requires_grad_(False)
         return self.dropout(x)
 
@@ -111,7 +100,6 @@ class LayerNormalization(nn.Module):
         super().__init__()
         self.eps = eps
 
-        # Initialize weights and bias to be learnable parameters, with shape matching features
         self.weights = nn.Parameter(torch.ones(features))
         self.bias = nn.Parameter(torch.zeros(features))
 
@@ -125,10 +113,8 @@ class LayerNormalization(nn.Module):
         Returns:
             torch.Tensor: Normalized tensor.
         """
-        # Calculate mean and standard deviation along the last dimension
         mean = x.mean(dim=-1, keepdim=True)
         std = x.std(dim=-1, keepdim=True)
-        # Apply layer normalization formula
         return self.weights * (x - mean) / (std + self.eps) + self.bias
 
 
@@ -162,7 +148,6 @@ class FeedForward(nn.Module):
         Returns:
             torch.Tensor: Output tensor (batch_size, seq_len, d_model).
         """
-        # Apply first linear layer, ReLU activation, dropout, and then second linear layer
         return self.layer2(self.dropout(torch.relu(self.layer1(x))))
 
 
