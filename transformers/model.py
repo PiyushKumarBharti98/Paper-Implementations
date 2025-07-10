@@ -55,18 +55,18 @@ class PositionalEncoding(nn.Module):
         self.seq_len = seq_len
         self.dropout = nn.Dropout(dropout)
 
-        pe = torch.zeros(seq_len, d_model)
+        self.pe = torch.zeros(seq_len, d_model)
 
         position = torch.arange(0, seq_len).unsqueeze(1).float()
         div_term = torch.exp(
             torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
         )
 
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        self.pe[:, 0::2] = torch.sin(position * div_term)
+        self.pe[:, 1::2] = torch.cos(position * div_term)
 
-        pe = pe.unsqueeze(0)  # Add batch dimension: (1, seq_len, d_model)
-        self.register_buffer("pe", pe)
+        self.pe = self.pe.unsqueeze(0)  # Add batch dimension: (1, seq_len, d_model)
+        self.register_buffer("pe", self.pe)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -154,12 +154,11 @@ class FeedForward(nn.Module):
 class MultiheadAttention(nn.Module):
     """docstring"""
 
-    def __init__(self, d_model: int, n_heads: int, dropout: int) -> None:
+    def __init__(self, d_model: int, n_heads: int, dropout: float) -> None:
         """docstring"""
         super().__init__()
         self.d_model = d_model
         self.n_heads = n_heads
-        self.dropout = dropout
 
         assert d_model % n_heads == 0
 
@@ -226,7 +225,7 @@ class ResidualConnection(nn.Module):
     def __init__(self, features: int, dropout: float):
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.features = LayerNormalization(features)
+        self.norm = LayerNormalization(features)
 
     def forward(self, x, sublayer):
         """docstring"""
@@ -252,8 +251,8 @@ class Encoder(nn.Module):
 
     def forward(self, x, mask):
         """docstring"""
-        x = self.residual[0](x, lambda x: self.self.attention_block(x, x, x, mask))
-        x = self.residula[1](x, self.feed_forward)
+        x = self.residual[0](x, lambda x: self.attention_block(x, x, x, mask))
+        x = self.residual[1](x, self.feed_forward)
         return x
 
 
@@ -412,7 +411,7 @@ def transformer_implement(
         projection_layer,
     )
 
-    for p in transformer.parameter():
+    for p in transformer.parameters():
         if p.dim() > 1:
             nn.init.xavier_uniform_(p)
 
