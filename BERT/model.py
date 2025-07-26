@@ -18,7 +18,7 @@ class InputEmbedding(nn.Module):
         return self.embedding(x) * math.sqrt(self.d_model)
 
 
-class PositionaEncoding(nn.Module):
+class PositionalEncoding(nn.Module):
     """docstring"""
 
     def __init__(self, seq_len: int, d_model: int, dropout: float):
@@ -53,7 +53,7 @@ class LinearNormalization(nn.Module):
         super().__init__()
         self.eps = eps
 
-        self.weights = nn.Parameter(torch.zeros(features))
+        self.weights = nn.Parameter(torch.ones(features))
         self.bias = nn.Parameter(torch.zeros(features))
 
     def forward(self, x):
@@ -74,7 +74,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         """docstring"""
-        return self.layer2(self.dropout(self.layer1(x)))
+        return self.layer2(self.dropout(torch.relu(self.layer1(x))))
 
 
 class MultiHeadAttention(nn.Module):
@@ -102,7 +102,7 @@ class MultiHeadAttention(nn.Module):
         """docstring"""
         d_k = query.shape[-1]
 
-        attention_scores = (query @ key.transporse(-2, -1)) / math.sqrt(d_k)
+        attention_scores = (query @ key.transpose(-2, -1)) / math.sqrt(d_k)
         if mask is not None:
             attention_scores.masked_fill_(mask == 0, -1e9)
         attention_scores = attention_scores.softmax(dim=1)
@@ -120,27 +120,36 @@ class MultiHeadAttention(nn.Module):
 
         query = query.view(
             query.shape[0], query.shape[1], self.n_heads, self.d_k
-        ).transporse(1, 2)
+        ).transpose(1, 2)
 
-        key = key.view(key.shape[0], key.shape[1], self.n_heads, self.d_k).transporse(
+        key = key.view(key.shape[0], key.shape[1], self.n_heads, self.d_k).transpose(
             1, 2
         )
 
         value = value.view(
             value.shape[0], value.shape[1], self.n_heads, self.d_k
-        ).transporse(1, 2)
+        ).transpose(1, 2)
 
         x, self.attention_scores = MultiHeadAttention.attention(
             query, key, value, mask, self.dropout
         )
 
-        x = (
-            x.transporse(1, 2)
-            .contigious()
-            .view(x.shape[0], -1, self.n_heads * self.d_k)
-        )
+        x = x.transpose(1, 2).contigious().view(x.shape[0], -1, self.n_heads * self.d_k)
 
         return self.o_weights(x)
+
+
+class ResidualConnection(nn.Module):
+    """docstring"""
+
+    def __init__(self, dropout: float, features: int) -> None:
+        """docstring"""
+        super().__init__()
+        self.dropout = nn.Dropout(dropout)
+        self.LinearNormalization = LinearNormalization(features)
+
+    def forward(self, x, sublayer):
+        return x + self.LinearNormalization(sublayer(self.dropout(x)))
 
 
 class Encoder(nn.Module):
@@ -148,9 +157,71 @@ class Encoder(nn.Module):
 
     def __init__(
         self,
+        features: int,
+        attention_block: MultiHeadAttention,
+        feed_forward: FeedForward,
+        dropout: float,
     ) -> None:
         """docstring"""
         super().__init__()
+        self.attention_block = attention_block
+        self.feed_forward = feed_forward
+        self.residual = nn.ModuleList(
+            [ResidualConnection(dropout, features) for _ in range(2)]
+        )
 
-    def forward(self):
+    def forward(self, x, mask):
         """docstring"""
+        x = self.residual[0](x, lambda x: self.attention_block(x, x, x, mask))
+        x = self.residual[1](x, self.feed_forward)
+        return x
+
+
+class EncoderLayer(nn.Module):
+    """docstring"""
+
+    def __init__(self, features: int, layers: nn.ModuleList) -> None:
+        """docstring"""
+        super().__init__()
+        self.layers = layers
+        self.norm = LinearNormalization(features)
+
+    def forward(self, x, mask):
+        """docstring"""
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
+
+
+class BERT(nn.Module):
+    """BERT model implementation"""
+
+    def __init__(
+        self,
+        vocab_size: int,
+        max_len: int = 512,
+        d_model: int = 768,
+        n_layers: int = 12,
+        n_heads: int = 12,
+        d_ff: int = 3072,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.token_embedding = InputEmbedding(vocab_size, d_model)
+        self.positional_encoding = PositionalEncoding(max_len, d_model, dropout)
+
+        encoder_blocks = []
+        for _ in range(n_layers):
+            attention = MultiHeadAttention(d_model, n_heads, dropout)
+            feed_forward = FeedForward(d_model, d_ff, dropout)
+            encoder_block = Encoder(d_model, attention, feed_forward, dropout)
+            encoder_blocks.append(encoder_block)
+
+        self.encoder = EncoderLayer(d_model, nn.ModuleList(encoder_blocks))
+
+    def forward(self, x, mask=None):
+        """forward"""
+        x = self.token_embedding(x)
+        x = self.positional_encoding(x)
+        x = self.encoder(x, mask)
+        return x
