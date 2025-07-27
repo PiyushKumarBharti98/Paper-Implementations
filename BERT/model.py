@@ -146,10 +146,11 @@ class ResidualConnection(nn.Module):
         """docstring"""
         super().__init__()
         self.dropout = nn.Dropout(dropout)
-        self.LinearNormalization = LinearNormalization(features)
+        self.layernorm = LinearNormalization(features)
 
     def forward(self, x, sublayer):
-        return x + self.LinearNormalization(sublayer(self.dropout(x)))
+        """docstring"""
+        return x + self.layernorm(sublayer(self.dropout(x)))
 
 
 class Encoder(nn.Module):
