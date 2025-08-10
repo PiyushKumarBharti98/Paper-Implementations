@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -34,9 +35,9 @@ class MultiQueryAttention(nn.Module):
         k = k.unsqueeze(1).expand(-1, self.n_heads, -1, -1)
         v = v.unsqueeze(1).expand(-1, self.n_heads, -1, -1)
 
-        attention_scores = (q * k.transpose(-2, -1)) / (self.d_k**0.5)
+        attention_scores = torch.matmul(q, k.transpose(-2, -1)) / (self.d_k**0.5)
         attention_weights = F.softmax(attention_scores, dim=-1)
-        out = attention_weights * v
+        out = torch.matmul(attention_weights, v)
 
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
         return self.output(out)
