@@ -36,7 +36,7 @@ class RoPositionalEncoding(nn.Module):
         cos = pos_emb[..., 1::2, :]
 
         rotated_x1 = x1 * cos - x2 * sin
-        rotated_x2 = x2 * cos + x2 * sin
+        rotated_x2 = x2 * sin + x2 * cos
 
         x = torch.zeros_like(x)
         x[..., 0::2] = rotated_x1

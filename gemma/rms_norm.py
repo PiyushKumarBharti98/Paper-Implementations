@@ -12,5 +12,5 @@ class RMSNorm(nn.Module):
 
     def forward(self, x):
         """docstring"""
-        rms = torch.sqrt(torch.mean(x**2, dim=1, keepdim=True) + self.eps)
+        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
         return self.scale * (x / rms)
