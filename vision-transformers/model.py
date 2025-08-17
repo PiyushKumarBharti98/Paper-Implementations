@@ -1,6 +1,6 @@
-import math
 import torch
 from torch import nn
+from config import VIT_BASE_CONFIG as config
 
 
 class PatchEmbeddings(nn.Module):
@@ -8,10 +8,10 @@ class PatchEmbeddings(nn.Module):
 
     def __init__(
         self,
-        image_size: int,
-        patch_size: int,
-        in_channels: int,
-        embedding_size: int = 768,
+        image_size: int = config["image_size"],
+        patch_size: int = config["patch_size"],
+        in_channels: int = config["in_channels"],
+        embedding_size: int = config["embedding_size"],
     ) -> None:
         super().__init__()
         self.num_patches = (image_size // patch_size) ** 2
@@ -38,7 +38,12 @@ class PatchEmbeddings(nn.Module):
 class MultiHeadSelfAttention(nn.Module):
     """docstring"""
 
-    def __init__(self, embedding_dim: int, num_heads: int, dropout: float) -> None:
+    def __init__(
+        self,
+        embedding_dim: int = config["embedding_dim"],
+        num_heads: int = config["num_heads"],
+        dropout: float = config["dropout"],
+    ) -> None:
         super().__init__()
         self.num_heads = num_heads
         self.head_dim = embedding_dim / num_heads
@@ -76,7 +81,12 @@ class MultiHeadSelfAttention(nn.Module):
 class MLP(nn.Module):
     """docstring"""
 
-    def __init__(self, embedding_size: int, mlp_size: int, dropout: float) -> None:
+    def __init__(
+        self,
+        embedding_size: int = config["embedding_size"],
+        mlp_size: int = config["mlp_size"],
+        dropout: float = config["dropout"],
+    ) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(embedding_size, mlp_size),
@@ -95,7 +105,11 @@ class VITEncoder(nn.Module):
     """docstring"""
 
     def __init__(
-        self, embedding_size: int, num_heads: int, mlp_size: int, dropout: float
+        self,
+        embedding_size: int = config["embedding_size"],
+        num_heads: int = config["num_heads"],
+        mlp_size: int = config["mlp_size"],
+        dropout: float = config["dropout"],
     ) -> None:
         super().__init__()
         self.norm1 = nn.LayerNorm(embedding_size)
@@ -115,15 +129,15 @@ class FinalModel(nn.Module):
 
     def __init__(
         self,
-        image_size: int,
-        patch_size: int,
-        embedding_size: int,
-        in_channels: int,
-        num_heads: int,
-        dropout: float,
-        mlp_size: int,
-        num_layers: int,
-        num_classes: int,
+        image_size: int = config["image_size"],
+        patch_size: int = config["patch_size"],
+        in_channels: int = config["in_channels"],
+        embedding_size: int = config["embedding_size"],
+        num_heads: int = config["num_heads"],
+        mlp_size: int = config["mlp_size"],
+        dropout: float = config["dropout"],
+        num_layers: int = config["num_layers"],
+        num_classes: int = config["num_classes"],
     ) -> None:
         super().__init__()
         self.patch_embeddings = PatchEmbeddings(
