@@ -1,8 +1,6 @@
-from math import inf
 import torch
 from torch import nn
 from torch.nn.modules import padding
-import torchvision
 
 
 class ResBlock(nn.Module):
@@ -50,10 +48,49 @@ class ResBlock(nn.Module):
         return output
 
 
+class GatedConv(nn.Module):
+    """docstring"""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        padding: int = 0,
+        dilation: int = 1,
+    ) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=True,
+        )
+        self.mask = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            bias=True,
+        )
+
+    def forward(self, x):
+        """docstring"""
+        features = self.conv(x)
+        mask = torch.sigmoid(self.mask(x))
+        return features * mask
+
+
 class Encoder(nn.Module):
     """docstring"""
 
-    def __init__(self, in_channels, out_channels) -> None:
+    def __init__(self, in_channels) -> None:
         super().__init__()
         self.mod = nn.Sequential(
             nn.Conv2d(in_channels, out_channels=32, kernel_size=5, stride=1, padding=1),
@@ -73,7 +110,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     """docstring"""
 
-    def __init__(self, in_channels, out_channels) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.mod = nn.Sequential(
             ResBlock(in_channels=96, out_channels=96),
@@ -87,3 +124,77 @@ class Decoder(nn.Module):
     def forward(self, x: torch.Tensor):
         """docstring"""
         return self.mod(x)
+
+
+class MapsGenerator(nn.Module):
+    """docstring"""
+
+    def __init__(self, geometric_channels: int, appearance_channels: int) -> None:
+        super().__init__()
+        self.geometry_encoder = Encoder(in_channels=geometric_channels)
+        self.appearance_encoder = Encoder(in_channels=appearance_channels)
+        self.decoder = Decoder()
+
+        self.rotation_head = nn.Sequential(
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels=32, out_channels=4, kernel_size=3, padding=1),
+        )
+
+        self.scaling_head = nn.Sequential(
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels=32, out_channels=3, kernel_size=3, padding=1),
+        )
+
+        self.opacity_head = nn.Sequential(
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels=32, out_channels=1, kernel_size=3, padding=1),
+        )
+
+    def forward(self, geometric_channels, appearance_channels):
+        """docstring"""
+        enc_geo = self.geometry_encoder(geometric_channels)
+        enc_appr = self.appearance_encoder(appearance_channels)
+
+        combined_features = enc_geo + enc_appr
+        decoded_features = self.decoder(combined_features)
+
+        rotation_map = self.rotation_head(decoded_features)
+        scaling_map = self.scaling_head(decoded_features)
+        opacity_map = self.opacity_head(decoded_features)
+
+        return rotation_map, scaling_map, opacity_map
+
+
+class InPaintingGenerator(nn.Module):
+    """docstring"""
+
+    def __init__(self, in_channels: int = 4) -> None:
+        super().__init__()
+
+        self.coarse_encoder = nn.Sequential(
+            GatedConv(in_channels, 48, kernel_size=5, stride=1, padding=2),
+            GatedConv(48, 48, kernel_size=3, stride=1, padding=1),
+            GatedConv(48, 96, kernel_size=3, stride=2, padding=1),
+            GatedConv(96, 96, kernel_size=3, stride=1, padding=1),
+            GatedConv(96, 192, kernel_size=3, stride=2, padding=1),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=1),
+        )
+
+        self.coarse_dilation = nn.Sequential(
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=2, dilation=2),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=4, dilation=4),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=8, dilation=8),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=16, dilation=16),
+        )
+
+        self.coarse_decoder = nn.Sequential(
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            GatedConv(192, 96, kernel_size=3, stride=1, padding=1),
+            GatedConv(96, 96, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            GatedConv(96, 48, kernel_size=3, stride=1, padding=1),
+            GatedConv(48, 24, kernel_size=3, stride=1, padding=1),
+            GatedConv(24, 3, kernel_size=3, stride=1, padding=1),
+            nn.Tanh(3),
+        )
