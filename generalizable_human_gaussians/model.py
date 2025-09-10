@@ -169,6 +169,35 @@ class MapsGenerator(nn.Module):
         return rotation_map, scaling_map, opacity_map
 
 
+class SelfAttention(nn.Module):
+    """docstring"""
+
+    def __init__(self, in_channels: int) -> None:
+        super().__init__()
+        self.query = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.key = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.value = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        """docstring"""
+        batch_size, C, width, height = x.size()
+
+        proj_query = self.query(x).view(batch_size, -1, widht * height).permute(0, 2, 1)
+        proj_key = self.key(x).view(batch_size, -1, width * height)
+
+        attention = torch.bmm(proj_query, proj_key)
+
+        attention = torch.nn.functional.softmax(attention, dim=1)
+
+        proj_value = self.value(x).view(batch_size, -1, width * height).permute(0, 2, 1)
+
+        output = torch.bmm(attention, proj_value).view(batch_size, C, width, height)
+
+        return output
+
+
 class InPaintingGenerator(nn.Module):
     """docstring"""
 
