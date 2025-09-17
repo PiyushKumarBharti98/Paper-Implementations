@@ -1,10 +1,5 @@
 import torch
 from torch import nn
-from torch.nn.modules import padding
-from ast import increment_lineno
-import torch
-from torch import nn
-from torch.nn.modules import padding
 
 
 class ResBlock(nn.Module):
@@ -231,3 +226,50 @@ class InPaintingGenerator(nn.Module):
             GatedConv(24, 3, kernel_size=3, stride=1, padding=1),
             nn.Tanh(3),
         )
+
+        self.refine_encoder = nn.Sequential(
+            GatedConv(in_channels, 48, kernel_size=5, stride=1, padding=2),
+            GatedConv(48, 48, kernel_size=3, stride=1, padding=1),
+            GatedConv(48, 96, kernel_size=3, stride=2, padding=1),
+            GatedConv(96, 96, kernel_size=3, stride=1, padding=1),
+            GatedConv(96, 192, kernel_size=3, stride=2, padding=1),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=1),
+        )
+
+        self.refine_attention = nn.Sequential(
+            SelfAttention(192), GatedConv(192, 192, kernel_size=3, stride=1, padding=1)
+        )
+
+        self.refine_decoder = nn.Sequential(
+            GatedConv(192 + 192, 192, kernel_size=3, stride=1, padding=1),
+            GatedConv(192, 192, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            GatedConv(192, 96, kernel_size=3, stride=1, padding=1),
+            GatedConv(96, 96, kernel_size=3, stride=1, padding=1),
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            GatedConv(96, 48, kernel_size=3, stride=1, padding=1),
+            GatedConv(48, 24, kernel_size=3, stride=1, padding=1),
+            GatedConv(24, 3, kernel_size=3, stride=1, padding=1),
+            nn.Tanh(3),
+        )
+
+    def forward(self, image, mask):
+        """docstring"""
+        input_mask = image * (1 - mask)
+        first_stage = torch.cat([input_mask, mask], dim=1)
+
+        coarse_encoded = self.coarse_encoder(first_stage)
+        coase_dilated = self.coarse_dilation(coarse_encoded)
+        coarse_decoded = self.coarse_decoder(coase_dilated)
+
+        second_stage = torch.cat([coarse_decoded, mask], dim=1)
+
+        refine_encoded = self.refine_encoder(second_stage)
+        refine_attention = self.refine_attention(refine_encoded)
+
+        third_stage = torch.cat([refine_attention, mask], dim=1)
+
+        refine_decoded = self.refine_decoder(third_stage)
+
+        final_image = image * (1 - mask) + refine_decoded * mask
+        return final_image
