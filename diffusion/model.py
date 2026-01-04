@@ -7,16 +7,6 @@ class Attention(nn.Module):
     def __init__(self, n_heads: int, seq_len: float) -> None:
         super().__init__()
 
-    def _postionalencoding(
-        self,
-    ) -> None:
-        return
-
-    def _inputembedding(
-        self,
-    ) -> None:
-        return
-
 
 class Encoder(nn.Module):
     def __init__(
