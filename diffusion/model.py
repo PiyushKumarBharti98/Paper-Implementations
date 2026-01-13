@@ -5,12 +5,12 @@ from torch.nn.modules import Conv2d, padding
 import einops
 
 
-class Attention(nn.Module):
+class VAE_AttentionBlock(nn.Module):
     def __init__(self, channels: int) -> None:
         super().__init__()
 
 
-class ResidualBlock(nn.Module):
+class VAE_ResidualBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int) -> None:
         super().__init__()
         self.GroupNorm1 = nn.GroupNorm(32, in_channels)
@@ -39,31 +39,50 @@ class ResidualBlock(nn.Module):
         return x + self.residual_layer(residual)
 
 
-class Encoder(nn.Module):
-    def __init__(
-        self,
-        image: torch.Tensor,
-        noise: float,
-    ) -> None:
+class VAE_Encoder_ModuleList(nn.Module):
+    def __init__(self):
         super().__init__()
-
-        self.model = nn.Sequential(
-            nn.Conv2d(3, 128, kernel_size=3, padding=1), 
-            ResidualBlock(128, 128),
-            ResidualBlock(128,128),
-            nn.Conv2d(128,128,kernel_size=3,stride=2,padding=0),
-            ResidualBlock(128,256),
-            ResidualBlock(256,256),
-            nn.Conv2d(256,256,kernel_size=3,stride=2,padding=0),
-            ResidualBlock(256,512),
-            ResidualBlock(512,512),
-            nn.Conv2d(512,512,kernel_size=3,stride=2,padding=0),
-            ResidualBlock(512,512),
-            ResidualBlock(512,512),
-            ResidualBlock(512,512),
-            Attention(512),
-            nn.GroupNorm(32,512),
-            nn.SiLU()
-            nn.Conv2d(512,8,kernel_size=3,padding=1),
-            nn.Conv2d(8,8,kernel_size=3,padding=0)
-        )
+        
+        self.layers = nn.ModuleList([
+            nn.Conv2d(3, 128, kernel_size=3, padding=1),
+            VAE_ResidualBlock(128, 128),
+            VAE_ResidualBlock(128, 128),
+            nn.Conv2d(128, 128, kernel_size=3, stride=2, padding=0),
+            VAE_ResidualBlock(128, 256),
+            VAE_ResidualBlock(256, 256),
+            nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=0),
+            VAE_ResidualBlock(256, 512),
+            VAE_ResidualBlock(512, 512),
+            nn.Conv2d(512, 512, kernel_size=3, stride=2, padding=0),
+            VAE_ResidualBlock(512, 512),
+            VAE_ResidualBlock(512, 512),
+            VAE_ResidualBlock(512, 512),
+            VAE_AttentionBlock(512),
+            VAE_ResidualBlock(512, 512),
+            nn.GroupNorm(32, 512),
+            nn.SiLU(),
+            nn.Conv2d(512, 8, kernel_size=3, padding=1),
+            nn.Conv2d(8, 8, kernel_size=1, padding=0),
+        ])
+        
+        self.needs_padding = [3, 6, 9]  
+    
+    def forward(self, x, noise):
+        for i, layer in enumerate(self.layers):
+            if i in self.needs_padding:
+                _, _, h, w = x.shape
+                pad_h = (2 - h % 2) % 2
+                pad_w = (2 - w % 2) % 2
+                x = F.pad(x, (0, pad_w, 0, pad_h))
+            
+            x = layer(x)
+        
+        mean, log_variance = torch.chunk(x, 2, dim=1)
+        log_variance = torch.clamp(log_variance, -30, 20)
+        variance = log_variance.exp()
+        stdev = variance.sqrt()
+        
+        x = mean + stdev * noise
+        x *= 0.18215
+        
+        return x
