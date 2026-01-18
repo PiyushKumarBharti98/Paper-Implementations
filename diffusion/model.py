@@ -5,11 +5,6 @@ import torch.nn.functional as F
 from einops import rearrange, einsum
 
 
-class VAE_AttentionBlock(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-
 class SelfAttention(nn.Module):
     def __init__(
         self,
@@ -52,17 +47,17 @@ class SelfAttention(nn.Module):
         # output = self.out_proj(output)
 
         # manual forward pass
-        q = torch.view(
-            self.batch_size, self.seq_len, self.n_heads, self.d_head
-        ).transpose(1, 2)
+        q = q.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
 
-        k = torch.view(
-            self.batch_size, self.seq_len, self.n_heads, self.d_head
-        ).transpose(1, 2)
+        k = k.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
 
-        v = torch.view(
-            self.batch_size, self.seq_len, self.n_heads, self.d_head
-        ).transpose(1, 2)
+        v = v.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
 
         scale = math.sqrt(d_head)
 
@@ -81,6 +76,11 @@ class SelfAttention(nn.Module):
         output = self.out_proj(output)
 
         return output
+
+
+class VAE_AttentionBlock(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
 
 
 class VAE_ResidualBlock(nn.Module):
