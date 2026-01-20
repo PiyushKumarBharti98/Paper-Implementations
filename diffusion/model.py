@@ -1,8 +1,10 @@
+from _typeshed import Self
 import math
 import torch
-from torch import diagonal, nn
+from torch import channels_last, conv2d, diagonal, nn, scalar_tensor
 import torch.nn.functional as F
 from einops import rearrange, einsum
+from torch.nn.modules import padding
 
 
 class SelfAttention(nn.Module):
@@ -20,7 +22,7 @@ class SelfAttention(nn.Module):
         self.n_heads = n_heads
         self.d_head = d_embed // n_heads
 
-    def forward(self, x):
+    def forward(self, x, masked=False):
 
         batch_size, seq_len, d_embed = x.shape
 
@@ -59,13 +61,19 @@ class SelfAttention(nn.Module):
             1, 2
         )
 
-        scale = math.sqrt(d_head)
+        scale = math.sqrt(self.d_head)
 
         # qk = torch.matmul(q, k).view(
         #     self.batch_size, self.n_heads, self.seq_len, self.seq_len
         # )
 
         qk = torch.matmul(q, k).transpose(-1, -2)
+
+        if masked == True:
+            mask = torch.ones(seq_len, seq_len, dtype=bool, device=qk.device).triu(
+                diagonal=1
+            )
+            qk = qk.masked_fill(mask)
 
         mul = qk / scale
 
@@ -78,9 +86,126 @@ class SelfAttention(nn.Module):
         return output
 
 
-class VAE_AttentionBlock(nn.Module):
-    def __init__(self) -> None:
+class CrossAttention(nn.Module):
+    def __init__(
+        self,
+        n_heads: int,
+        d_embed: int,
+        input_projection_bias: bool,
+        output_projection_bias: bool,
+    ) -> None:
         super().__init__()
+        self.q_proj = nn.Linear(d_embed, d_embed, bias=input_projection_bias)
+        self.k_proj = nn.Linear(d_embed, d_embed, bias=input_projection_bias)
+        self.v_proj = nn.Linear(d_embed, d_embed, bias=input_projection_bias)
+        self.out_proj = nn.Linear(d_embed, d_embed, bias=output_projection_bias)
+
+        self.n_heads = n_heads
+        self.d_head = d_embed // n_heads
+
+    def forward(self, x, y, masked=False):
+
+        batch_size, seq_len, d_embed = x.shape
+
+        q = self.q_proj(x)
+        k = self.k_proj(y)
+        v = self.v_proj(y)
+
+        # einops operations
+        # q = rearrange(q, "b s (h  d) -> b h s d", h=self.n_heads)
+        # k = rearrange(k, "b s (h  d) -> b h s d", h=self.n_heads)
+        # v = rearrange(v, "b s (h  d) -> b h s d", h=self.n_heads)
+        #
+        # qk = einsum(q, k, "b h i d, b h j d -> b h i j") / math.sqrt(self.d_head)
+        #
+        # if masked == True:
+        #     mask = torch.ones(seq_len, seq_len, dtype=bool, device=qk.device).triu(
+        #         diagonal=1
+        #     )
+        #     qk = qk.masked_fill(mask)
+        #
+        # mul = F.softmax(qk)
+        # final = einsum(qk, v, "b h i j, b h j d -> b h i d")
+        #
+        # output = rearrange(final, "b h s d -> b s (h d)")
+        #
+        # output = self.out_proj(output)
+
+        # manual forward pass
+        q = q.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
+
+        k = k.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
+
+        v = v.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
+            1, 2
+        )
+
+        scale = math.sqrt(self.d_head)
+
+        # qk = torch.matmul(q, k).view(
+        #     self.batch_size, self.n_heads, self.seq_len, self.seq_len
+        # )
+
+        qk = torch.matmul(q, k).transpose(-1, -2)
+
+        if masked == True:
+            mask = torch.ones(seq_len, seq_len, dtype=bool, device=qk.device).triu(
+                diagonal=1
+            )
+            qk = qk.masked_fill(mask)
+
+        mul = qk / scale
+
+        final = F.softmax(qk)
+
+        output = torch.matmul(final, v)
+
+        output = self.out_proj(output)
+
+        return output
+
+
+class ClIPEmbeddings(nn.Module):
+    def __init__(self, n_heads: int, d_embed: int) -> None:
+        super().__init__()
+        self.attention = SelfAttention(n_heads, d_embed, True, True)
+        self.postional_embeddings = nn.Parameter(torch.zeros(n_heads, d_embed))
+
+
+class VAE_AttentionBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        input_projection_bias: bool = True,
+        output_projection_bias: bool = True,
+    ) -> None:
+        super().__init__()
+        self.GroupNorm = nn.GroupNorm(32, in_channels)
+        self.attention = SelfAttention(
+            1, in_channels, input_projection_bias, output_projection_bias
+        )
+
+    def forward(self, x):
+
+        residue = x
+
+        batch_size, channels, height, width = x.size
+
+        x = x.view(batch_size, channels, height * width).transpose(1, 2)
+
+        x = self.attention(x)
+
+        x = x.transpose(1, 2)
+
+        x = x.view(batch_size, channels, height, width)
+
+        x += residue
+
+        return x
 
 
 class VAE_ResidualBlock(nn.Module):
@@ -120,7 +245,7 @@ class VAE_ResidualBlock(nn.Module):
         return x + self.residual_layer(residual)
 
 
-class VAE_Encoder_ModuleList(nn.Module):
+class VAE_Encoder(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -168,4 +293,45 @@ class VAE_Encoder_ModuleList(nn.Module):
         x = mean + stdev * noise
         x *= 0.18215
 
+        return x
+
+
+class VAE_Decoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.layers = nn.ModuleList(
+            [
+                nn.Conv2d(4, 512, kernel_size=1, padding=0),
+                nn.Conv2d(512, 512, kernel_size=3, padding=1),
+                VAE_ResidualBlock(512, 512),
+                VAE_AttentionBlock(512),
+                VAE_ResidualBlock(512, 512),
+                VAE_ResidualBlock(512, 512),
+                VAE_ResidualBlock(512, 512),
+                VAE_ResidualBlock(512, 512),
+                nn.Upsample(scale_factor=2),
+                nn.Conv2d(512, 512, kernel_size=3, padding=1),
+                VAE_ResidualBlock(512, 512),
+                VAE_ResidualBlock(512, 512),
+                VAE_ResidualBlock(512, 512),
+                nn.Upsample(scale_factor=2),
+                nn.Conv2d(512, 512, kernel_size=3, padding=1),
+                VAE_ResidualBlock(512, 256),
+                VAE_ResidualBlock(256, 256),
+                VAE_ResidualBlock(256, 256),
+                nn.Upsample(scale_factor=2),
+                nn.Conv2d(256, 256, kernel_size=3, padding=1),
+                VAE_ResidualBlock(256, 128),
+                VAE_ResidualBlock(128, 128),
+                VAE_ResidualBlock(128, 128),
+                nn.GroupNorm(32, 128),
+                nn.SiLU(),
+                nn.Conv2d(128, 3, kernel_size=3, padding=1),
+            ]
+        )
+
+    def forward(self, x, noise):
+        x /= 0.18215
+        x = self.layers(x)
         return x
