@@ -170,10 +170,65 @@ class CrossAttention(nn.Module):
 
 
 class ClIPEmbeddings(nn.Module):
-    def __init__(self, n_heads: int, d_embed: int) -> None:
+    def __init__(self, n_vocab: int, d_embed: int, n_token: int) -> None:
         super().__init__()
-        self.attention = SelfAttention(n_heads, d_embed, True, True)
-        self.postional_embeddings = nn.Parameter(torch.zeros(n_heads, d_embed))
+        self.token_embeddings = nn.Embedding(n_vocab, d_embed)
+        self.postional_embeddings = nn.Parameter(torch.zeros(n_vocab, d_embed))
+
+    def forward(self, x):
+
+        x = self.token_embeddings(x)
+        x += self.postional_embeddings
+
+        return x
+
+
+class CLIPPlayer(nn.Module):
+    def __init__(self, d_embed: int, n_head: int) -> None:
+        super().__init__()
+        self.layernorm1 = nn.LayerNorm(d_embed)
+        self.attention = SelfAttention(d_embed, n_head)
+        self.layernorm2 = nn.LayerNorm(d_embed)
+
+        self.linear1 = nn.Linear(d_embed, 4 * d_embed)
+        self.linear2 = nn.Linear(4 * d_embed, d_embed)
+
+    def forward(self, x):
+
+        residue = x
+
+        x = self.layernorm1(x)
+        x = self.attention(x)
+        x += residue
+
+        residue = x
+        x = self.layernorm2(x)
+        x = self.linear1(x)
+        x = x * torch.sigmoid(1.702 * x)
+        x = self.linear2(x)
+        x += residue
+
+        return x
+
+
+class CLIP(nn.Module):
+    def __init__(self, n_tokens: int, n_embed: int, n_head: int) -> None:
+        super().__init__()
+        self.embeddings = ClIPEmbeddings(n_tokens, n_embed, n_head)
+        self.clipmodel = nn.ModuleList([CLIPPlayer(n_embed, n_head) for i in range(12)])
+        self.layernorm = nn.LayerNorm(n_embed)
+
+    def forward(self, tokens):
+        tokens = tokens.type(torch.long)
+
+        x = self.embeddings(tokens)
+
+        for layer in self.clipmodel:
+            x = layer(x)
+
+        out = self.layernorm(x)
+
+        return out
 
 
 class VAE_AttentionBlock(nn.Module):
