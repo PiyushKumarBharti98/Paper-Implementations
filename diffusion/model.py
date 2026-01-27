@@ -475,11 +475,10 @@ class UNET_AttentionBlock(nn.Module):
 class Upsample(nn.Module):
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
+        channels: int,
     ) -> None:
         super().__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
 
     def forward(self, x):
 
