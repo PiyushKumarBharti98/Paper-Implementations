@@ -40,7 +40,7 @@ def pipe_func(
     seed=None,
     device="cuda",
     idle_device=None,
-    tokenizer=None,
+    tokenizer=CLIPTokenizer,
 ):
     with torch.no_grad():
         if not 0 < strength <= 1:
