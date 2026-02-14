@@ -51,17 +51,11 @@ class SelfAttention(nn.Module):
         # output = self.out_proj(output)
 
         # manual forward pass
-        q = q.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        q = q.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
-        k = k.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        k = k.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
-        v = v.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        v = v.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
         scale = math.sqrt(self.d_head)
 
@@ -69,7 +63,7 @@ class SelfAttention(nn.Module):
         #     self.batch_size, self.n_heads, self.seq_len, self.seq_len
         # )
 
-        qk = torch.matmul(q, k).transpose(-1, -2)
+        qk = q @ k.transpose(-1, -2)
 
         if masked == True:
             mask = torch.ones(seq_len, seq_len, dtype=bool, device=qk.device).triu(
@@ -79,9 +73,11 @@ class SelfAttention(nn.Module):
 
         mul = qk / scale
 
-        final = F.softmax(qk)
+        final = F.softmax(qk, dim=-1)
 
-        output = torch.matmul(final, v)
+        output = final @ v
+
+        output = output.transpose(1, 2).reshape(batch_size, seq_len, d_embed)
 
         output = self.out_proj(output)
 
@@ -135,17 +131,11 @@ class CrossAttention(nn.Module):
         # output = self.out_proj(output)
 
         # manual forward pass
-        q = q.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        q = q.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
-        k = k.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        k = k.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
-        v = v.view(self.batch_size, self.seq_len, self.n_heads, self.d_head).transpose(
-            1, 2
-        )
+        v = v.view(batch_size, seq_len, self.n_heads, self.d_head).transpose(1, 2)
 
         scale = math.sqrt(self.d_head)
 
@@ -153,7 +143,7 @@ class CrossAttention(nn.Module):
         #     self.batch_size, self.n_heads, self.seq_len, self.seq_len
         # )
 
-        qk = torch.matmul(q, k).transpose(-1, -2)
+        qk = q @ k.transpose(-1, -2)
 
         if masked == True:
             mask = torch.ones(seq_len, seq_len, dtype=bool, device=qk.device).triu(
@@ -163,9 +153,11 @@ class CrossAttention(nn.Module):
 
         mul = qk / scale
 
-        final = F.softmax(qk)
+        final = F.softmax(qk, dim=-1)
 
-        output = torch.matmul(final, v)
+        output = final @ v
+
+        output = output.transpose(1, 2).reshape(batch_size, seq_len, d_embed)
 
         output = self.out_proj(output)
 
@@ -215,11 +207,13 @@ class CLIPPlayer(nn.Module):
 
 
 class CLIP(nn.Module):
-    def __init__(self, n_tokens: int, n_embed: int, n_head: int) -> None:
+    def __init__(
+        self, n_vocab: int = 49408, d_embed: int = 768, n_token: int = 77
+    ) -> None:
         super().__init__()
-        self.embeddings = ClIPEmbeddings(n_tokens, n_embed, n_head)
-        self.clipmodel = nn.ModuleList([CLIPPlayer(n_embed, n_head) for i in range(12)])
-        self.layernorm = nn.LayerNorm(n_embed)
+        self.embeddings = ClIPEmbeddings(n_vocab, d_embed, n_token)
+        self.clipmodel = nn.ModuleList([CLIPPlayer(d_embed, n_head) for i in range(12)])
+        self.layernorm = nn.LayerNorm(d_embed)
 
     def forward(self, tokens):
         tokens = tokens.type(torch.long)
@@ -251,7 +245,7 @@ class VAE_AttentionBlock(nn.Module):
 
         residue = x
 
-        batch_size, channels, height, width = x.size
+        batch_size, channels, height, width = x.shape
 
         x = x.view(batch_size, channels, height * width).transpose(1, 2)
 
@@ -389,9 +383,10 @@ class VAE_Decoder(nn.Module):
             ]
         )
 
-    def forward(self, x, noise):
+    def forward(self, x):
         x /= 0.18215
-        x = self.layers(x)
+        for layer in self.layers:
+            x = layer(x)
         return x
 
 
@@ -404,7 +399,7 @@ class TimeEmbedding(nn.Module):
     def forward(self, x):
         x = self.linear1(x)
 
-        x = nn.SiLU(x)
+        x = F.silu(x)
 
         x = self.linear2(x)
 
@@ -495,7 +490,7 @@ class UNET_ResidualBlock(nn.Module):
 
         self.timelayer = nn.Linear(n_time, out_channels)
 
-        self.groupnorm_time = nn.GroupNorm(32, in_channels)
+        self.groupnorm_time = nn.GroupNorm(32, out_channels)
         self.convlayer_time = nn.Conv2d(
             in_channels, out_channels, kernel_size=3, padding=1
         )
@@ -682,11 +677,11 @@ class Diffusion(nn.Module):
         self.unet = UNET()
         self.output = UNET_Out(320, 4)
 
-    def forward(self, x, time):
+    def forward(self, x, context, time):
 
         time = self.time(time)
 
-        out = self.unet(x)
+        out = self.unet(x, context, time)
 
         out = self.output(out)
 

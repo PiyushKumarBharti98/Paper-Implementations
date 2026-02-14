@@ -51,7 +51,7 @@ class DDPMSampler:
 
         return variance
 
-    def set_strenght(self, strength: int = 1):
+    def set_strength(self, strength: float = 1.0):
         start_step = self.num_training_steps - (self.num_inference_steps * strength)
         self.timesteps = self.timesteps[start_step:]
         self.start_step = start_step
@@ -73,7 +73,7 @@ class DDPMSampler:
         ) / alpha_t**0.5
 
         predicted_sample_coeff = ((beta_prev_t ** (0.5)) * curr_beta_t) / beta_t
-        current_sample_coeff = (curr_alpha_t) ** 5 * (beta_prev_t) / curr_beta_t
+        current_sample_coeff = (curr_alpha_t) ** 0.5 * (beta_prev_t) / curr_beta_t
 
         predicted_prev_samples = (
             predicted_sample_coeff * prediction_original_sample
@@ -91,6 +91,7 @@ class DDPMSampler:
             )
 
             variance = (self._get_variance(t) ** 0.5) * noise
+            predicted_prev_samples += variance
 
         return predicted_prev_samples
 
